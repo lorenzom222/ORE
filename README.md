@@ -1,4 +1,4 @@
-# Changes
+# Recent Changes
 
 - Added `--full_folder` param to `eval_linear`
     - Take the entire "linear_prob_dataset" and does a 80/20 split into train and val in `set_loaders` line 90
