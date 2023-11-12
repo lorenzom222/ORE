@@ -503,31 +503,17 @@ def average_precision_score(
     )
 
 
-def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_races,
+def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_groups,
                           sample_weight=None):
     
-    label_race = {'0': 'Caucasian', '1': 'Indian', '2': 'Asian', '3': 'African'}
+    group_ap_dict = {group: [0,0] for group in labels_to_groups.values()}
 
-    label_supcat = {'Plants': 'Plants', 'Birds': 'Birds', 'Insects': 'Insects',}
-
-    #first val is ap total, second is num_samples
-    race_ap_dict = {'Caucasian': [0,0], 'Indian': [0,0], 'Asian': [0,0], 'African': [0,0]}
-    
-    sup_ap_dict = {'Plants': [0,0], 'Birds': [0,0], 'Insects': [0,0],}
-
-    # def update_race_score(class_pos, class_name, score_c):
-    #     race_label = labels_to_races[class_name]
-    #     race = label_race[race_label]
-    #     num_class_c = np.count_nonzero(y_true[:, class_pos])
-    #     race_ap_dict[race][0] += score_c
-    #     race_ap_dict[race][1] += num_class_c
-    def update_supcat_score(class_pos, class_name, score_c):
-        print("labels_to_races: ", labels_to_races)
-        race_label = labels_to_races[class_name]
-        race = label_supcat[race_label]
+    def update_group_score(class_pos, class_name, score_c):
+        group_label = labels_to_groups[class_name]
+        group = group_label
         num_class_c = np.count_nonzero(y_true[:, class_pos])
-        sup_ap_dict[race][0] += score_c
-        sup_ap_dict[race][1] += num_class_c
+        group_ap_dict[group][0] += score_c
+        group_ap_dict[group][1] += num_class_c
 
     check_consistent_length(y_true, y_score, sample_weight)
     y_true = check_array(y_true)
@@ -546,7 +532,7 @@ def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_rac
     # n_classes = y_score.shape[not_average_axis]
     n_classes = y_true.shape[not_average_axis]
     # get the first col that has non-zero values
-    cur_min_class = list(labels_to_races.keys())[0]
+    cur_min_class = list(labels_to_groups.keys())[0]
     score = np.zeros((n_classes,))
     print("n_classes: ", n_classes)
     print("cur_min_class: ", cur_min_class)
@@ -555,35 +541,14 @@ def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_rac
         cur_class = c
         y_true_c = y_true.take([c], axis=not_average_axis).ravel()
         y_score_c = y_score.take([cur_class], axis=not_average_axis).ravel()
-        score[c] = binary_metric(y_true_c, y_score_c,
-                                 sample_weight=score_weight)
-        # print("class: ", cur_class, "score: ", score[c])
-        update_supcat_score(c, cur_class, score[c])
+        score[c] = binary_metric(y_true_c, y_score_c, sample_weight=score_weight)
+        update_group_score(c, cur_class, score[c])
 
     #TODO: add as param
     num_class_per_race = 10
 
-    # #Average result by race
-    # for race, val in race_ap_dict.items():
-    #     #0 is ap total, 1 is num_samples
-    #     if val[1] > 0:
-    #         val[0] /= num_class_per_race
-    # print("total mean ap: ", np.average(score, weights=average_weight))
-    #Average result by race
-    for supcat, val in sup_ap_dict.items():
-        #0 is ap total, 1 is num_samples
+    for group, val in group_ap_dict.items():
         if val[1] > 0:
             val[0] /= num_class_per_race
     print("total mean ap: ", np.average(score, weights=average_weight))
-    return sup_ap_dict
-
-    # # Average the results
-    # if average is not None:
-    #     if average_weight is not None:
-    #         # Scores with 0 weights are forced to be 0, preventing the average
-    #         # score from being affected by 0-weighted NaN elements.
-    #         average_weight = np.asarray(average_weight)
-    #         score[average_weight == 0] = 0
-    #     return np.average(score, weights=average_weight)
-    # else:
-    #     return score
+    return group_ap_dict
