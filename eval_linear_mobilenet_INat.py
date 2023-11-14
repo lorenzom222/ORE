@@ -414,10 +414,6 @@ def validate(val_loader, net, criterion, opt):
     return losses.avg, top1.avg, groups_to_ap, group_to_acc
 
 def main():
-    if opt.track_race_acc:
-        best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
-    elif opt.track_supcat_acc:
-        best_acc = {'Total': 0, 'Birds': 0, 'Plants': 0, 'Insects': 0}
 
     patience = 5
     best_group_ap = None
@@ -425,6 +421,10 @@ def main():
     
     delta = 0.001
     opt = parse_option()
+    if opt.track_race_acc:
+        best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
+    elif opt.track_supcat_acc:
+        best_acc = {'Total': 0, 'Birds': 0, 'Plants': 0, 'Insects': 0}
 
     if opt.wandb:
         wandb.init(project='swav_mobilenet', entity='ore-dreamteam', group='eval_aug_{}_epochs'.format(opt.epochs))
@@ -496,7 +496,7 @@ def main():
     for name, meter in best_group_ap.items():
             print(f'{name} mean AP ({meter.avg:.3f})')
     print('\nLinear prob acc')
-    for _, (name, meter) in groups_acc.items():
+    for name, meter in groups_acc.items():
         print(f'{name} acc {meter.val:.3f} ({meter.avg:.3f})')
 
 if __name__ == '__main__':
