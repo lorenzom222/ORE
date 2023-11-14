@@ -27,8 +27,8 @@ class MultiCropDataset(datasets.ImageFolder):
         max_scale_crops,
         size_dataset=-1,
         return_index=False,
-        pil_blur=False,
-        return_label=False,
+        mean = [0.485, 0.456, 0.406],
+        std = [0.228, 0.224, 0.225],
     ):
         super(MultiCropDataset, self).__init__(data_path)
         assert len(size_crops) == len(nmb_crops)
@@ -36,52 +36,31 @@ class MultiCropDataset(datasets.ImageFolder):
         assert len(max_scale_crops) == len(nmb_crops)
         if size_dataset >= 0:
             self.samples = self.samples[:size_dataset]
-        if return_label:
-            self.samples = []
         self.return_index = return_index
-        self.return_label = return_label
 
-        # color_transform = [get_color_distortion(), RandomGaussianBlur()]
-        if pil_blur:
-            color_transform = [get_color_distortion(), PILRandomGaussianBlur()]
-        mean = [0.485, 0.456, 0.406]
-        std = [0.228, 0.224, 0.225]
+        color_transform = [get_color_distortion(), PILRandomGaussianBlur()]
         trans = []
         for i in range(len(size_crops)):
             randomresizedcrop = transforms.RandomResizedCrop(
                 size_crops[i],
                 scale=(min_scale_crops[i], max_scale_crops[i]),
             )
-            trans.extend(
-                [
-                    transforms.Compose(
-                        [
-                            randomresizedcrop,
-                            transforms.RandomHorizontalFlip(p=0.5),
-                            transforms.Compose(color_transform),
-                            transforms.ToTensor(),
-                            transforms.Normalize(mean=mean, std=std),
-                        ]
-                    )
-                ]
-                * nmb_crops[i]
-            )
+            trans.extend([transforms.Compose([
+                randomresizedcrop,
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.Compose(color_transform),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=mean, std=std)])
+            ] * nmb_crops[i])
         self.trans = trans
 
     def __getitem__(self, index):
-        if self.return_label:
-            path, target = self.samples[index]
-            image = self.loader(path)
-            multi_crops = list(map(lambda trans: trans(image), self.trans))
-            # not implementing self.return_index yet
-            return multi_crops, target
-        else:
-            path, _ = self.samples[index]
-            image = self.loader(path)
-            multi_crops = list(map(lambda trans: trans(image), self.trans))
-            if self.return_index:
-                return index, multi_crops
-        return multi_crops
+        path, target = self.samples[index]
+        image = self.loader(path)
+        multi_crops = list(map(lambda trans: trans(image), self.trans))
+        if self.return_index:
+            return index, multi_crops, target
+        return multi_crops, target
 
 
 # class RandomGaussianBlur(object):

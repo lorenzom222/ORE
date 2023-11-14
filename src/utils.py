@@ -307,14 +307,14 @@ class AverageMeter(object):
 #         return res
 
 
-def initialize_race_dicts(label_to_race_mapping):
+def initialize_group_dicts(label_to_group_mapping):
     """Initialize dictionaries to store correct predictions and total samples for each race."""
-    correct_by_race = {}
-    total_by_race = {}
-    for race in label_to_race_mapping.values():
-        correct_by_race[race] = 0
-        total_by_race[race] = 0
-    return correct_by_race, total_by_race
+    correct_by_group = {}
+    total_by_group = {}
+    for group in label_to_group_mapping.values():
+        correct_by_group[group] = 0
+        total_by_group[group] = 0
+    return correct_by_group, total_by_group
 
 
 def print_tensor_as_grid(tensor, title):
@@ -322,8 +322,8 @@ def print_tensor_as_grid(tensor, title):
     print(np.array(tensor.cpu()))
 
 
-def update_race_dicts(
-    correct, target, label_to_race_mapping, correct_by_race, total_by_race
+def update_group_dicts(
+    correct, target, label_to_group_mapping, correct_by_group, total_by_group
 ):
     """
     Update dictionaries with data from the current batch.
@@ -331,9 +331,9 @@ def update_race_dicts(
     Args:
     - correct: A tensor indicating whether predictions were correct for the current batch.
     - target: A tensor containing true labels for the current batch.
-    - label_to_race_mapping: A dictionary mapping labels to race categories.
-    - correct_by_race: A dictionary to store the count of correct predictions for each race.
-    - total_by_race: A dictionary to store the total count of samples for each race.
+    - label_to_group_mapping: A dictionary mapping labels to race categories.
+    - correct_by_group: A dictionary to store the count of correct predictions for each race.
+    - total_by_group: A dictionary to store the total count of samples for each race.
     """
     # print(f"target: {target}")
     # print(f"correct: {correct}")
@@ -349,42 +349,42 @@ def update_race_dicts(
         true_label = target[sample_index].item()
         # print(f"true_label: {true_label}")
 
-        race = label_to_race_mapping[true_label]
-        # print(label_to_race_mapping)
+        race = label_to_group_mapping[true_label]
+        # print(label_to_group_mapping)
         # print(f"race: {race}")
 
         # Increment the total count for this race
-        total_by_race[race] += 1
-        # print(f"total_by_race: {total_by_race}")
+        total_by_group[race] += 1
+        # print(f"total_by_group: {total_by_group}")
 
-        # print(f"After processing sample {sample_index}, total count for {race} is now {total_by_race[race]}")
+        # print(f"After processing sample {sample_index}, total count for {race} is now {total_by_group[race]}")
         # print(f"correct: {correct}")
 
         pred_label = correct[sample_index].item()
         # print(f"pred_label: {pred_label}")
 
         # If this label was predicted correctly, increment the count for this race
-        correct_by_race[race] += pred_label
-        # print(f"Correct prediction for {race}, correct count is now {correct_by_race[race]}")
+        correct_by_group[race] += pred_label
+        # print(f"Correct prediction for {race}, correct count is now {correct_by_group[race]}")
 
         # print("----")  # Separating lines for better visualization
 
 
-def calculate_accuracy_by_race(correct_by_race, total_by_race):
+def calculate_accuracy_by_race(correct_by_group, total_by_group):
     """
     Calculate accuracy for each race.
 
     Args:
-    - correct_by_race: A dictionary storing the count of correct predictions for each race.
-    - total_by_race: A dictionary storing the total count of samples for each race.
+    - correct_by_group: A dictionary storing the count of correct predictions for each race.
+    - total_by_group: A dictionary storing the total count of samples for each race.
 
     Returns:
     - accuracy_by_race: A dictionary with accuracy values for each race.
     """
     accuracy_by_race = {}
-    race_keys = correct_by_race.keys()
-    correct_values = correct_by_race.values()
-    total_values = total_by_race.values()
+    race_keys = correct_by_group.keys()
+    correct_values = correct_by_group.values()
+    total_values = total_by_group.values()
 
     zipped_data = list(zip(race_keys, correct_values, total_values))
 
@@ -398,7 +398,7 @@ def calculate_accuracy_by_race(correct_by_race, total_by_race):
     return accuracy_by_race
 
 
-def accuracy(output, target, topk=(1,), label_to_race_mapping=None):
+def accuracy(output, target, topk=(1,), label_to_group_mapping=None):
     """Computes the accuracy over the k top predictions for the specified values of k, and records accuracy by race"""
     with torch.no_grad():
         maxk = max(topk)
@@ -414,44 +414,35 @@ def accuracy(output, target, topk=(1,), label_to_race_mapping=None):
         target_expand_pred = target_viewed.expand_as(pred)
 
         correct = pred.eq(target_expand_pred)
-        # if label_to_race_mapping:
 
-        # print(f"pred T: {pred}")
-        # print(f"target_viewed: {target_viewed}")
-        # print(f"target_expand_pred: {target_expand_pred}")
-        # print(f"correct: {correct}")
 
         res = []
         acc_by_race_topk = []
 
         for k in topk:
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
-            # print(f"correct_k: {correct_k}")
             average_overall = correct_k.mul_(100.0 / batch_size)
-            # print(f"average_overall: {average_overall}")
             res.append(average_overall)
 
-        if label_to_race_mapping:
+        if label_to_group_mapping:
             for k in topk:
                 target_expand_k = target_expand_pred[:k].reshape(-1)
                 correct_k = correct[:k].reshape(-1).float()
-                correct_by_race, total_by_race = initialize_race_dicts(
-                    label_to_race_mapping
+                correct_by_group, total_by_group = initialize_group_dicts(
+                    label_to_group_mapping
                 )
-                update_race_dicts(
+                update_group_dicts(
                     correct_k,
                     target_expand_k,
-                    label_to_race_mapping,
-                    correct_by_race,
-                    total_by_race,
+                    label_to_group_mapping,
+                    correct_by_group,
+                    total_by_group,
                 )
                 accuracy_by_race = calculate_accuracy_by_race(
-                    correct_by_race, total_by_race
+                    correct_by_group, total_by_group
                 )
-                # print(f"accuracy_by_race: {accuracy_by_race}")
                 acc_by_race_topk.append(accuracy_by_race)
-            # print(f"acc_by_race_topk: {acc_by_race_topk}")
-            print("res: ", res)
+            # print("res: ", res)
             return res, acc_by_race_topk
 
         return res

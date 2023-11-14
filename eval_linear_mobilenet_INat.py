@@ -274,7 +274,6 @@ def label_to_supcat(labels, id_to_idx, id_to_supcat):
   
     class_labels = [class_label for idx in id_list for class_label, class_idx in id_to_idx.items() if class_idx == idx] # Get the list of corresponding ids that the images are from
 
-
     label_to_sup_mapping = dict(zip(id_list, class_labels))
 
     return label_to_sup_mapping
@@ -308,7 +307,7 @@ def set_meters(opt, val_loader):
 def validate(val_loader, net, criterion, opt):
     """validation"""
     net.eval()
-    id_to_idx, (superclass_to_ap, superclass_to_acc, id_to_superclass) = set_meters(opt, val_loader)
+    id_to_idx, (groups_to_ap, group_to_acc, id_to_group) = set_meters(opt, val_loader)
 
 
     batch_time = AverageMeter()
@@ -317,7 +316,7 @@ def validate(val_loader, net, criterion, opt):
 
     all_labels = []
     all_outputs = []
-    labels_to_superclass = None
+    labels_to_group = None
 
     with torch.no_grad():
         end = time.time()
@@ -328,9 +327,9 @@ def validate(val_loader, net, criterion, opt):
 
             #get race accuracy
             if opt.track_race_acc:
-                labels_to_superclass = label_to_race(labels, id_to_idx, id_to_superclass)
+                labels_to_group = label_to_race(labels, id_to_idx, id_to_group)
             elif opt.track_supcat_acc:
-                labels_to_superclass = label_to_supcat(labels, id_to_idx, id_to_superclass)
+                labels_to_group = label_to_supcat(labels, id_to_idx, id_to_group)
 
             # forward
             output = net(images)            
@@ -347,25 +346,25 @@ def validate(val_loader, net, criterion, opt):
                 #     if race_ap_batch[race][1] > 0:
                 #         race_to_ap[race].update(race_ap_batch[race][0], race_ap_batch[race][1])
                 #get accuracy
-                acc1, accuracy_by_race = accuracy(output, labels, topk=(1,5), label_to_race_mapping = labels_to_superclass)
+                acc1, accuracy_by_race = accuracy(output, labels, topk=(1,5), label_to_group_mapping = labels_to_group)
                 accuracy_by_race_1 = accuracy_by_race[0]
                 top1.update(acc1[0][0], bsz)
 
                 for race, acc in accuracy_by_race_1.items():
                     race = int(race)  # Convert race to an integer
-                    name = superclass_to_acc[race][0]
-                    meter = superclass_to_acc[race][1]
+                    name = group_to_acc[race][0]
+                    meter = group_to_acc[race][1]
                     meter.update(acc, bsz)
 
             elif opt.track_supcat_acc:
 
-                acc1, accuracy_by_supcat = accuracy(output, labels, topk=(1,5), label_to_race_mapping = labels_to_superclass)
+                acc1, accuracy_by_supcat = accuracy(output, labels, topk=(1,5), label_to_group_mapping = labels_to_group)
                 accuracy_by_supcat_1 = accuracy_by_supcat[0]
                 top1.update(acc1[0][0], bsz)
 
                 for supcat, acc in accuracy_by_supcat_1.items():
-                    name = superclass_to_acc[supcat]
-                    meter = superclass_to_acc[supcat]
+                    name = group_to_acc[supcat]
+                    meter = group_to_acc[supcat]
                     meter.update(acc, bsz)
             else:
                 acc1, acc5 = accuracy(output, labels, topk=(1, 5))
@@ -397,30 +396,33 @@ def validate(val_loader, net, criterion, opt):
     all_outputs = np.concatenate(all_outputs, axis=0)
 
     if opt.track_race_acc:
-        labels_to_superclass = label_to_race(labels, id_to_idx, id_to_superclass)
+        labels_to_group = label_to_race(labels, id_to_idx, id_to_group)
     elif opt.track_supcat_acc:
-        labels_to_superclass = label_to_supcat(labels, id_to_idx, id_to_superclass)
+        labels_to_group = label_to_supcat(labels, id_to_idx, id_to_group)
 
-    total_superclass_ap = average_precision_score(y_score=all_outputs, y_true=all_labels, labels_to_races=labels_to_superclass)
+    total_group_ap = average_precision_score(y_score=all_outputs, y_true=all_labels, labels_to_races=labels_to_group)
 
-    for superclass in list(superclass_to_ap.keys()):
-        if total_superclass_ap[superclass][1] > 0:
-            superclass_to_ap[superclass].update(total_superclass_ap[superclass][0], total_superclass_ap[superclass][1])
+    for group in list(groups_to_ap.keys()):
+        if total_group_ap[group][1] > 0:
+            groups_to_ap[group].update(total_group_ap[group][0], total_group_ap[group][1])
 
-    for name, meter in superclass_to_ap.items():
+    for name, meter in groups_to_ap.items():
         print(f'{name} AP {meter.val:.3f} ({meter.avg:.3f})')
 
     print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1)) 
 
-    return losses.avg, top1.avg, superclass_to_ap, superclass_to_acc
+    return losses.avg, top1.avg, groups_to_ap, group_to_acc
 
 def main():
-    # best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
-    best_acc = {'Total': 0, 'Birds': 0, 'Plants': 0, 'Insects': 0}
+    if opt.track_race_acc:
+        best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
+    elif opt.track_supcat_acc:
+        best_acc = {'Total': 0, 'Birds': 0, 'Plants': 0, 'Insects': 0}
 
     patience = 5
-    best_race_ap = None
-    best_race_acc = None
+    best_group_ap = None
+    # best__acc = None 
+    
     delta = 0.001
     opt = parse_option()
 
@@ -448,28 +450,28 @@ def main():
 
         print('Train Loss: {:.4f}, Train Acc: {:.4f}'.format(train_loss, train_acc))
          
-        loss, val_acc, superclass_to_ap, superclass_acc = validate(val_loader, net, criterion, opt)
+        loss, val_acc, groups_to_ap, groups_acc = validate(val_loader, net, criterion, opt)
 
-        # get the keys from superclass_acc
-        superclasses = list(superclass_acc.keys())
+        # get the keys from groups_acc
+        groups = list(groups_acc.keys())
 
         # make delta_weights = {'Total': 0.5, other keys: (distribution that all add up to 1.0)} 
-        delta_weights = {superclass: 0.5 / len(superclasses) for superclass in superclasses}
+        delta_weights = {group: 0.5 / len(groups) for group in groups}
         delta_weights['Total'] = 0.5
 
-        # then update weighted_improvement from superclass_acc
+        # then update weighted_improvement from groups_acc
         weighted_improvement = delta_weights['Total'] * (val_acc - best_acc['Total'])
-        # print("superclass_acc: ", superclass_acc)
-        for superclass in superclasses:
-            weighted_improvement += delta_weights[superclass] * (superclass_acc[superclass].avg - best_acc[superclass])
+        # print("groups_acc: ", groups_acc)
+        for group in groups:
+            weighted_improvement += delta_weights[group] * (groups_acc[group].avg - best_acc[group])
 
         if weighted_improvement > delta:
             best_acc['Total'] = val_acc
-            for superclass in superclasses:
-                best_acc[superclass] = superclass_acc[superclass].avg
+            for group in groups:
+                best_acc[group] = groups_acc[group].avg
             best_epoch = epoch
             patience = 5
-            best_sup_ap = superclass_to_ap
+            best_group_ap = groups_to_ap
         else:
             patience -= 1
         if opt.wandb:
@@ -484,26 +486,18 @@ def main():
         if opt.early_stopping and patience==0:
             print("Stopping early...")
             break
-        #not saving model yet
 
     print('best epoch', best_epoch)
     print('best total accuracy: {:.2f}'.format(best_acc['Total']))
-    if opt.track_race_acc:
-        print('best acc and ap')
-        for name, meter in best_race_ap.items():
-                print(f'{name} mean AP ({meter.avg:.3f})')
-        print('\nLinear prob acc')
-        # for _, (name, meter) in best_race_acc.items():
-        #     print(f'{name} acc {meter.val:.3f} ({meter.avg:.3f})')
-        for name, acc in best_acc.items():
-            print(f'{name} acc {acc:.3f}')
-
-        print("\ncur_epoch{}, cur stats: ".format(epoch))
-        for name, meter in best_sup_ap.items():
-                print(f'{name} mean AP ({meter.avg:.3f})')
-        print('\nLinear prob acc')
-        for _, (name, meter) in superclass_acc.items():
-            print(f'{name} acc {meter.val:.3f} ({meter.avg:.3f})')
+    print('best acc and ap')
+    for name, acc in best_acc.items():
+        print(f'{name} acc {acc:.3f}')
+    print("\ncur_epoch{}, cur stats: ".format(epoch))
+    for name, meter in best_group_ap.items():
+            print(f'{name} mean AP ({meter.avg:.3f})')
+    print('\nLinear prob acc')
+    for _, (name, meter) in groups_acc.items():
+        print(f'{name} acc {meter.val:.3f} ({meter.avg:.3f})')
 
 if __name__ == '__main__':
     set_seed(42)
