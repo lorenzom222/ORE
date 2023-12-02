@@ -30,9 +30,9 @@ from src.utils import (
 )
 from src.multicropdataset import MultiCropDataset
 # import src.mobilenet_modified_swav as mobilenet_models
-import src.mobilenet_modified_gelu2 as mobilenet_models
-from src.mobilenet_modified_gelu2 import * # Cosine with bias
-
+# import src.mobilenet_modified_gelu2 as mobilenet_models
+# from src.mobilenet_modified_gelu2 import * # Cosine with bias
+from torchvision.models import resnet18
 from tqdm import tqdm
 # from mixup import FastCollateMixup, Mixup
 
@@ -289,9 +289,10 @@ def main():
             #log local crop 
 
     # build model
-    model = mobilenet_models.__dict__[args.arch](
-        num_classes=args.max_class,
-        pretrained=False)
+    # model = mobilenet_models.__dict__[args.arch](
+    #     num_classes=args.max_class,
+    #     pretrained=False)
+    model = resnet18(pretrained=False, num_classes=args.max_class)
     print("args.max_class: ", args.max_class)
     if args.pretrained:
         # path = "/home/lorenzo/ore-dir/swav/experiments/home/nina/swav/experiments/MobNet_Large_Wider_ore_asian_no_aug/"
@@ -374,6 +375,8 @@ def main():
         training_stats.update(scores)
 
         if args.rank == 0 and args.wandb:
+            logger.info("Logged Metrics into WANDB")
+
             wandb.log({'epoch': epoch, 
                        'avg_loss': loss_avg,
                        'top1': top1_avg,
@@ -465,11 +468,11 @@ def train(logger, criterion, train_loader, model, optimizer, epoch, lr_schedule,
             sys.stdout.flush()
 
             if args.wandb:
-                wandb.log({'conv2d weight mean': model.module.features[0][0].weight.mean(),
-                'conv2d weight std': model.module.features[0][0].weight.std()})
+                wandb.log({'conv2d weight mean': model.module.conv1.weight.mean(),
+               'conv2d weight std': model.module.conv1.weight.std()})
 
-            print("weight mean", model.module.features[0][0].weight.mean(), 
-            "weight std", model.module.features[0][0].weight.std())
+            print("weight mean", model.module.conv1.weight.mean(), 
+            "weight std", model.module.conv1.weight.std())
         
     return (epoch, losses.avg), losses.avg, top1.avg
 

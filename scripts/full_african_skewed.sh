@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # IMAGES_DIR=/home/nina/ore_balanced_dataset
 # IMAGES_DIR="/home/lorenzo/ore-dir/swav/data/experiments/full/unbalanced_asian"
-IMAGES_DIR=/home/nina/asian_skew_dataset
+IMAGES_DIR=/home/nina/african_skew_dataset/
 
 # IMAGES_DIR=/home/nina/swav/mini_dataset
 # IMAGES_DIR=/data/datasets/Places_LT/small_easyformat/train
 # IMAGES_DIR=/data/datasets/ImageNet-100/train
-EXPT_NAME=ResNet_ORE_ASIAN_PRETRAIN_512
+EXPT_NAME=ResNet_ORE_AFRICAN_PRETRAIN_512
 EXPT_PATH="./experiments/$EXPT_NAME"
 mkdir -p $EXPT_PATH
 GPU=0,1,2,3
@@ -42,7 +42,7 @@ CUDA_VISIBLE_DEVICES=${GPU} python -m torch.distributed.launch --nproc_per_node=
   --dump_path $EXPT_PATH \
   --run_name $EXPT_NAME \
   --swav_aug false \
-  --subset_size 5930 \
+  --subset_size 5938 \
   --wandb true \
   --image_net_normalize true \
   --lr_scheduler true \
