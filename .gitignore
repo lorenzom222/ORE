@@ -1,0 +1,24 @@
+# Ignore .DS_Store files
+**/.DS_Store
+
+# Ignore Python cache directories
+**/__pycache__/
+
+# Ignore IPython Notebook files
+**/*.ipynb
+
+
+apex/
+data/
+experiments/
+edit_model_dict.py
+eval_linear.py
+eval_linear_ssl.py
+eval_semisup.py
+hubconf.py
+imagenet_ordering_labels/
+main_deepclusterv2.py
+main_mobilenet_sl copy.py
+main_mobilenet_ssl.py
+main_swav.py
+scripts/wandb/
