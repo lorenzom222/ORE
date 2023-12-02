@@ -282,6 +282,7 @@ def label_to_supcat(labels, id_to_idx, id_to_supcat):
 def set_meters(opt, val_loader):     
     if opt.track_race_acc:
         class_to_idx = val_loader.dataset.class_to_idx
+
     elif opt.track_supcat_acc:
         class_to_idx = val_loader.dataset.dataset.class_to_idx
 
@@ -328,6 +329,7 @@ def validate(val_loader, net, criterion, opt):
 
             #get race accuracy
             if opt.track_race_acc:
+                
                 labels_to_superclass = label_to_race(labels, id_to_idx, id_to_superclass)
             elif opt.track_supcat_acc:
                 labels_to_superclass = label_to_supcat(labels, id_to_idx, id_to_superclass)
@@ -404,8 +406,8 @@ def validate(val_loader, net, criterion, opt):
     return losses.avg, top1.avg, superclass_to_ap, superclass_to_acc
 
 def main():
-    # best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
-    best_acc = {'Total': 0, 'Birds': 0, 'Plants': 0, 'Insects': 0}
+    best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
+    # best_acc = {'Total': 0, 'Birds': 0, 'Plants': 0, 'Insects': 0}
 
     patience = 5
     best_race_ap = None

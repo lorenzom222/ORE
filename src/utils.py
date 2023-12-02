@@ -459,8 +459,7 @@ def set_seed(seed):
 
 
 def average_precision_score(
-    y_true, y_score, *, average="macro", pos_label=1, labels_to_races=None, sample_weight=None
-):
+    y_true, y_score, *, average="macro", pos_label=1, labels_to_races=None, sample_weight=None):
     def _binary_uninterpolated_average_precision(
             y_true, y_score, pos_label=1, sample_weight=None
         ):
@@ -477,7 +476,7 @@ def average_precision_score(
     # Convert to Python primitive type to avoid NumPy type / Python str
     # comparison. See https://github.com/numpy/numpy/issues/6784
     present_labels = np.unique(y_true).tolist()
-
+    # print("present_labels: ", present_labels)
     if pos_label != 1:
         raise ValueError(
             "Parameter pos_label is fixed to 1 for multiclass y_true. "
@@ -485,21 +484,32 @@ def average_precision_score(
         )
     y_true = label_binarize(y_true, classes=present_labels)
 
+    # Write the variable name and its contents to a text file
+    # with open(file_name, 'w') as file:
+    #     file.write(f"Variable Name: y_true\nContents: {y_true}")
+    y_true = np.array(y_true)
     average_precision = partial(
         _binary_uninterpolated_average_precision, pos_label=pos_label
     )
+    # Get the labels from label_race_dict
+    labels = list(labels_to_races.keys())
+
+    # Create a new dictionary mapping integers to labels
+    y_true_labels = {i: label for i, label in enumerate(labels[:len(y_true)])}
 
     return _average_binary_score(
-        average_precision, y_true, y_score, average, labels_to_races, sample_weight=sample_weight
+        average_precision, y_true, y_score, average, labels_to_races, sample_weight=sample_weight, y_true_labels = y_true_labels
     )
 
 
 def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_groups,
-                          sample_weight=None):
+                          sample_weight=None, y_true_labels = None):
     
     group_ap_dict = {group: [0,0] for group in labels_to_groups.values()}
 
     def update_group_score(class_pos, class_name, score_c):
+        # print("labels_to_groups: ", labels_to_groups)
+        # print("y_true_labels: ", y_true_labels)
         group_label = labels_to_groups[class_name]
         group = group_label
         num_class_c = np.count_nonzero(y_true[:, class_pos])
@@ -525,12 +535,14 @@ def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_gro
     # get the first col that has non-zero values
     cur_min_class = list(labels_to_groups.keys())[0]
     score = np.zeros((n_classes,))
-    print("n_classes: ", n_classes)
-    print("cur_min_class: ", cur_min_class)
+    # print("n_classes: ", n_classes)
+    # print("cur_min_class: ", cur_min_class)
 
     for c in range(n_classes):
         cur_class = c
         y_true_c = y_true.take([c], axis=not_average_axis).ravel()
+        # print("y_true: ",y_true_c)
+
         y_score_c = y_score.take([cur_class], axis=not_average_axis).ravel()
         score[c] = binary_metric(y_true_c, y_score_c, sample_weight=score_weight)
         update_group_score(c, cur_class, score[c])
@@ -539,7 +551,9 @@ def _average_binary_score(binary_metric, y_true, y_score, average, labels_to_gro
     num_class_per_race = 10
 
     for group, val in group_ap_dict.items():
+        # print(val)
         if val[1] > 0:
             val[0] /= num_class_per_race
-    print("total mean ap: ", np.average(score, weights=average_weight))
+        # print(group)
+    # print("total mean ap: ", np.average(score, weights=average_weight))
     return group_ap_dict

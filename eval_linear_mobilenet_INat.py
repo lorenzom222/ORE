@@ -68,7 +68,7 @@ def parse_option():
         # raise ValueError('one or more of the folders is None: data_folder')
     else:
         opt.train_folder = os.path.join(opt.data_path, 'train')
-        opt.val_folder = os.path.join(opt.data_path, 'val')
+        opt.val_folder = os.path.join(opt.data_path, 'test')
         opt.full_folder = None
     
 
@@ -261,11 +261,15 @@ def train(train_loader, net, criterion, optimizer, epoch, opt):
 
 def label_to_race(labels, id_to_idx, id_to_race):
     id_list = labels.tolist() 
-  
+    # print("id_list: ", id_list)
     class_labels = [class_label for idx in id_list for class_label, class_idx in id_to_idx.items() if class_idx == idx] # Get the list of corresponding ids that the images are from
+    # print("class_labels: ", class_labels)
 
     races = [id_to_race[class_label] for class_label in class_labels] 
+    # print("races: ", races)
+
     label_to_race_mapping = dict(zip(id_list, races))
+    # print("label_to_race_mapping: ", label_to_race_mapping)
 
     return label_to_race_mapping
 
@@ -281,6 +285,9 @@ def label_to_supcat(labels, id_to_idx, id_to_supcat):
 def set_meters(opt, val_loader):     
     if opt.track_race_acc:
         class_to_idx = val_loader.dataset.class_to_idx
+        # print("class_to_idx: ", class_to_idx)
+        num_classes = len(val_loader.dataset.classes)
+        print("Number of classes in val loader:", num_classes)
     elif opt.track_supcat_acc:
         class_to_idx = val_loader.dataset.dataset.class_to_idx
 
@@ -292,7 +299,9 @@ def set_meters(opt, val_loader):
     if opt.track_race_acc:
         race_to_ap = {race: AverageMeter() for race in ['Caucasian', 'Indian', 'Asian', 'African']}
         race_acc = {i: (race, AverageMeter()) for i, race in enumerate(race_to_ap.keys())}
-        id_to_race = {row['id']: row['race'] for row in csv.DictReader(open('/home/nina/SupContrast-ORE/data/new_balanced_data_split_final.csv', 'r'))}
+        id_to_race = {row['id']: row['race'] for row in csv.DictReader(open('/home/lorenzo/ore-dir/swav/data/experiments/drive/final_data/linear_prob_dataset_split.csv', 'r'))}
+        # print(race_acc)
+        # print(id_to_race)
         res =  (race_to_ap, race_acc, id_to_race)
     elif opt.track_supcat_acc:
         sup_to_ap = {sup: AverageMeter() for sup in ['Birds', 'Insects', 'Plants']}
@@ -308,6 +317,7 @@ def validate(val_loader, net, criterion, opt):
     """validation"""
     net.eval()
     id_to_idx, (groups_to_ap, group_to_acc, id_to_group) = set_meters(opt, val_loader)
+    race_map = {'Caucasian': '0', 'Indian': '1', 'Asian': '2', 'African': '3'}
 
 
     batch_time = AverageMeter()
@@ -395,16 +405,30 @@ def validate(val_loader, net, criterion, opt):
     all_labels = np.concatenate(all_labels, axis=0)
     all_outputs = np.concatenate(all_outputs, axis=0)
 
-    if opt.track_race_acc:
-        labels_to_group = label_to_race(labels, id_to_idx, id_to_group)
-    elif opt.track_supcat_acc:
-        labels_to_group = label_to_supcat(labels, id_to_idx, id_to_group)
 
+    if opt.track_race_acc:
+        labels_to_group = label_to_race(all_labels, id_to_idx, id_to_group)
+    elif opt.track_supcat_acc:
+        labels_to_group = label_to_supcat(all_labels, id_to_idx, id_to_group)
+    # print("all_labels: ", all_labels)
+    # print("labels_to_group: ", labels_to_group)
     total_group_ap = average_precision_score(y_score=all_outputs, y_true=all_labels, labels_to_races=labels_to_group)
+    # print(total_group_ap)
+    # for group, val in total_group_ap.items():
+    #     print(group)
+    #     print(val)
+    # for name, val in groups_to_ap.items():
+    #     print(name)
+
 
     for group in list(groups_to_ap.keys()):
-        if total_group_ap[group][1] > 0:
-            groups_to_ap[group].update(total_group_ap[group][0], total_group_ap[group][1])
+        # print(total_group_ap)
+        # if total_group_ap[group][1] > 0:
+        checker = group
+        if opt.track_race_acc:
+            checker = race_map[group]
+        if total_group_ap[checker][1] > 0:
+            groups_to_ap[group].update(total_group_ap[checker][0], total_group_ap[checker][1])
 
     for name, meter in groups_to_ap.items():
         print(f'{name} AP {meter.val:.3f} ({meter.avg:.3f})')
@@ -421,6 +445,7 @@ def main():
     
     delta = 0.001
     opt = parse_option()
+
     if opt.track_race_acc:
         best_acc = {'Total': 0, 'Caucasian': 0, 'Indian': 0, 'Asian': 0, 'African': 0}
     elif opt.track_supcat_acc:
@@ -454,6 +479,7 @@ def main():
 
         # get the keys from groups_acc
         groups = list(groups_acc.keys())
+        race_map = {'Caucasian': 0, 'Indian': 1, 'Asian': 2, 'African': 3}
 
         # make delta_weights = {'Total': 0.5, other keys: (distribution that all add up to 1.0)} 
         delta_weights = {group: 0.5 / len(groups) for group in groups}
@@ -463,12 +489,24 @@ def main():
         weighted_improvement = delta_weights['Total'] * (val_acc - best_acc['Total'])
         # print("groups_acc: ", groups_acc)
         for group in groups:
-            weighted_improvement += delta_weights[group] * (groups_acc[group].avg - best_acc[group])
+            # print("delta_weights: ", delta_weights)
+            d_group= delta_weights[group]
+            # print("groups_acc: ", groups_acc)
+            g_acc_avg = groups_acc[group][1].avg
+            g_name = groups_acc[group][0]
+            # print("g_name: ", g_name)
+
+            # print("best_acc: ", best_acc)
+
+            group_best_acc = best_acc[g_name]
+            weighted_improvement += delta_weights[group] * (groups_acc[group][1].avg - best_acc[g_name])
 
         if weighted_improvement > delta:
             best_acc['Total'] = val_acc
             for group in groups:
-                best_acc[group] = groups_acc[group].avg
+                g_name = groups_acc[group][0]
+
+                best_acc[g_name] = groups_acc[group][1].avg
             best_epoch = epoch
             patience = 5
             best_group_ap = groups_to_ap
@@ -490,13 +528,15 @@ def main():
     print('best epoch', best_epoch)
     print('best total accuracy: {:.2f}'.format(best_acc['Total']))
     print('best acc and ap')
+    # print("best_acc: ",best_acc)
     for name, acc in best_acc.items():
         print(f'{name} acc {acc:.3f}')
+    
     print("\ncur_epoch{}, cur stats: ".format(epoch))
     for name, meter in best_group_ap.items():
             print(f'{name} mean AP ({meter.avg:.3f})')
     print('\nLinear prob acc')
-    for name, meter in groups_acc.items():
+    for group_label, (name, meter) in groups_acc.items():
         print(f'{name} acc {meter.val:.3f} ({meter.avg:.3f})')
 
 if __name__ == '__main__':

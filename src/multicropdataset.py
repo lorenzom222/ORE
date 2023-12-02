@@ -26,7 +26,7 @@ class MultiCropDataset(datasets.ImageFolder):
         min_scale_crops,
         max_scale_crops,
         size_dataset=-1,
-        return_index=False,
+        return_label=False,
         mean = [0.485, 0.456, 0.406],
         std = [0.228, 0.224, 0.225],
     ):
@@ -36,9 +36,9 @@ class MultiCropDataset(datasets.ImageFolder):
         assert len(max_scale_crops) == len(nmb_crops)
         if size_dataset >= 0:
             self.samples = self.samples[:size_dataset]
-        self.return_index = return_index
+        self.return_label = return_label
 
-        color_transform = [get_color_distortion(), PILRandomGaussianBlur()]
+        color_transform = [PILRandomGaussianBlur()]
         trans = []
         for i in range(len(size_crops)):
             randomresizedcrop = transforms.RandomResizedCrop(
@@ -58,7 +58,7 @@ class MultiCropDataset(datasets.ImageFolder):
         path, target = self.samples[index]
         image = self.loader(path)
         multi_crops = list(map(lambda trans: trans(image), self.trans))
-        if self.return_index:
+        if self.return_label:
             return index, multi_crops, target
         return multi_crops, target
 

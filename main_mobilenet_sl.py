@@ -31,6 +31,8 @@ from src.utils import (
 from src.multicropdataset import MultiCropDataset
 # import src.mobilenet_modified_swav as mobilenet_models
 import src.mobilenet_modified_gelu2 as mobilenet_models
+from src.mobilenet_modified_gelu2 import * # Cosine with bias
+
 from tqdm import tqdm
 # from mixup import FastCollateMixup, Mixup
 
@@ -96,7 +98,8 @@ parser.add_argument("--wd", default=1e-6, type=float, help="weight decay")
 parser.add_argument("--warmup_epochs", default=10, type=int, help="number of warmup epochs")
 parser.add_argument("--start_warmup", default=0, type=float,
                     help="initial warmup learning rate")
-
+parser.add_argument("--pretrained", type=bool_flag, default=False,
+                    help="Loaded in Pretrained Checkpoint for finetuning")
 #########################
 #### dist parameters ###
 #########################
@@ -142,6 +145,53 @@ parser.add_argument('--image_net_normalize', default=False, type=bool_flag, help
 parser.add_argument('--lr_scheduler', default=True, type=bool_flag, help='use lr scheduler')
 parser.add_argument('--sweep', default=False, type=bool_flag, help='use wandb sweep')
 
+def safe_load_dict(model, new_model_state, should_resume_all_params=False):
+    old_model_state = model.state_dict()
+    c = 0
+    if should_resume_all_params:
+        for old_name, old_param in old_model_state.items():
+            assert old_name in list(new_model_state.keys()), "{} parameter is not present in resumed checkpoint".format(
+                old_name)
+    for name, param in new_model_state.items():
+        n = name.split('.')
+        beg = n[0]
+        end = n[1:]
+        if beg == 'module':
+            name = '.'.join(end)
+        if name not in old_model_state:
+            # print('%s not found in old model.' % name)
+            continue
+        if isinstance(param, nn.Parameter):
+            # backwards compatibility for serialized parameters
+            param = param.data
+        c += 1
+        if old_model_state[name].shape != param.shape:
+            print('Shape mismatch...ignoring %s' % name)
+            continue
+        else:
+            #if 'fc' not in name: ## NOT USING WEIGTS FROM FC LAYERS, SO I CAN INIT THEM WITH ONLINE LEARNING
+            #if 'linear' not in name:
+            old_model_state[name].copy_(param)
+    if c == 0:
+        raise AssertionError('No previous ckpt names matched and the ckpt was not loaded properly.')
+
+def build_classifier(classifier, classifier_ckpt, num_classes): # for swav
+    # mobilenet_models.__dict__[args.arch]
+    classifier = eval(classifier)(num_classes=num_classes)
+    #classifier = eval(classifier)()
+
+    if classifier_ckpt is None:
+        print("Will not resume any checkpoints!")
+    else:
+        resumed = torch.load(classifier_ckpt)
+        if 'state_dict' in resumed:
+            state_dict_key = 'state_dict'
+        else:
+            state_dict_key = 'model_state'
+        print("Resuming with {}".format(classifier_ckpt))
+        safe_load_dict(classifier, resumed[state_dict_key], should_resume_all_params=False)           
+    return classifier
+
 def main():
     torch.cuda.empty_cache()
     global args
@@ -152,67 +202,87 @@ def main():
 
     #initiate wandb
     if args.wandb:
-        wandb.init(project='mobilenet_sl', entity='ore-dreamteam', group=args.run_name, config=args)
+        wandb.init(project='full_finetuning', entity='ore-dreamteam', group=args.run_name, config=args)
 
 
     init_distributed_mode(args)
     fix_random_seeds(args.seed)
     logger, training_stats = initialize_exp(args, "epoch", "loss")
 
-    # build data
-    if args.swav_aug:
-        train_set =  datasets.ImageFolder(args.data_path)
-        train_dataset = MultiCropDataset(
-            args.data_path,
-            args.size_crops,
-            args.nmb_crops,
-            args.min_scale_crops,
-            args.max_scale_crops,
-            pil_blur=args.use_pil_blur,
-            return_label=True,
-        )
-        train_dataset.samples = train_set.samples
-        print(len(train_dataset))
-    else:
-        input_shape = [3, 224, 224]
+    # # build data
+    # if args.swav_aug:
+    #     train_set =  datasets.ImageFolder(args.data_path)
+    #     train_dataset = MultiCropDataset(
+    #         args.data_path,
+    #         args.size_crops,
+    #         args.nmb_crops,
+    #         args.min_scale_crops,
+    #         args.max_scale_crops,
+    #         # pil_blur=args.use_pil_blur,
+    #         return_label=True,
+    #     )
+    #     train_dataset.samples = train_set.samples
+    #     print(len(train_dataset))
+    # else:
+    input_shape = [3, 224, 224]
 
-        if args.image_net_normalize:
-            mean = [0.485, 0.456, 0.406]
-            std = [0.228, 0.224, 0.225]
-        else:
-            mean = [0.5, 0.5, 0.5]
-            std = [0.5, 0.5, 0.5]
-        train_transform = transforms.Compose([
-            transforms.Resize(224),
-            transforms.RandomCrop(input_shape[1:]),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=mean,std=std),
-        ])  
-        train_dataset = datasets.ImageFolder(
-            root=args.data_path,
-            transform=train_transform
-        )
-        # print("labels", train_dataset.class_to_idx)
-        
-    sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        sampler=sampler,
+    if args.image_net_normalize:
+        mean = [0.485, 0.456, 0.406]
+        std = [0.228, 0.224, 0.225]
+    else:
+        mean = [0.5, 0.5, 0.5]
+        std = [0.5, 0.5, 0.5]
+    train_transform = transforms.Compose([
+        transforms.Resize(224),
+        transforms.RandomCrop(input_shape[1:]),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=mean,std=std),
+    ])  
+    train_dataset = datasets.ImageFolder(
+        root=args.data_path,
+        transform=train_transform
+    )
+
+    class_indices = []
+    for i in range(args.subset_size):  # replace 10 with the number of classes you want
+        class_indices += [j for j, t in enumerate(train_dataset.targets) if t == i]
+
+    # Create a subset of the dataset
+    subset_dataset = torch.utils.data.Subset(train_dataset, class_indices)
+
+    # Create a new DataLoader
+    subset_loader = torch.utils.data.DataLoader(
+        subset_dataset,
+        sampler=torch.utils.data.distributed.DistributedSampler(subset_dataset),
         batch_size=args.batch_size,
         num_workers=args.workers,
         pin_memory=True,
         drop_last=True,
     )
+
+
+    # sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    # train_loader = torch.utils.data.DataLoader(
+    #     train_dataset,
+    #     sampler=sampler,
+    #     batch_size=args.batch_size,
+    #     num_workers=args.workers,
+    #     pin_memory=True,
+    #     drop_last=True,
+    # )
+    train_loader = subset_loader
     logger.info("Building data done with {} images loaded.".format(len(train_dataset)))
 
     #wandb log first 10 images, each image is a list of images
-    
-    if args.wandb and args.swav_aug:
+    num_classes = len(train_loader.dataset.dataset.class_to_idx)
+    logger.info(f'Number of classes: {num_classes}')
+
+    if args.wandb:
         if args.rank == 0:
             for image_list, labels in train_loader:
-                image = image_list[0]
+                image = image_list[1]
                 images_to_log = [wandb.Image(image[i], caption=f'Label: {labels[i]}') for i in range(len(image))]
                 wandb.log({'train_images': images_to_log})
                 break
@@ -222,6 +292,14 @@ def main():
     model = mobilenet_models.__dict__[args.arch](
         num_classes=args.max_class,
         pretrained=False)
+    print("args.max_class: ", args.max_class)
+    if args.pretrained:
+        # path = "/home/lorenzo/ore-dir/swav/experiments/home/nina/swav/experiments/MobNet_Large_Wider_ore_asian_no_aug/"
+        path = "/home/lorenzo/ore-dir/swav/scripts/experiments/MobNet_Large_Wider_ore_asian_finetuned_BALANCED/"
+        checkpoint_path = path+'checkpoint.pth.tar'
+
+        model = build_classifier(args.arch, checkpoint_path, num_classes= args.max_class)
+
 
     #set criterion:
     criterion = torch.nn.CrossEntropyLoss().cuda()
@@ -230,11 +308,7 @@ def main():
     if args.sync_bn == "pytorch":
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     elif args.sync_bn == "apex":
-        # with apex syncbn we sync bn per group because it speeds up computation
-        # compared to global syncbn
-        #apex depreacted
-        # process_group = apex.parallel.create_syncbn_process_group(args.syncbn_process_group_size)
-        # model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
+
         process_group = nn.create_syncbn_process_group(args.syncbn_process_group_size)
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model, process_group=process_group)
     # copy model to GPU
@@ -252,12 +326,6 @@ def main():
         weight_decay=args.wd,
     )
 
-    #try adam
-    # optimizer = torch.optim.Adam(
-    #     model.parameters(),
-    #     lr=args.base_lr,
-    #     weight_decay=args.wd,
-    # )
 
     # LARC
     optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
@@ -271,8 +339,7 @@ def main():
 
     # init mixed precision
     if args.use_fp16:
-    #     #apex.amp deprecated
-    #     model, optimizer = apex.amp.initialize(model, optimizer, opt_level="O1")
+
         scaler = GradScaler()
         logger.info("Initializing mixed precision done.")
 
@@ -280,22 +347,13 @@ def main():
     model = nn.parallel.DistributedDataParallel(
         model,
         device_ids=[args.gpu_to_work_on],)
-    
+
 
     # optionally resume from a checkpoint
     to_restore = {"epoch": 0}
-    #restart_from_checkpoint(
-    #    os.path.join(args.dump_path, "checkpoint.pth.tar"),
-    #    run_variables=to_restore,
-    #    state_dict=model,
-    #    optimizer=optimizer,
-    #    amp=apex.amp,
-    #)
+
     start_epoch = to_restore["epoch"]
 
-    # cudnn.benchmark = True
-    
-    # mixup_fn = Mixup(mixup_alpha=0.8, cutmix_alpha=1.0, prob=0.5, num_classes=args.max_class)
 
     loss_epc=[]
 
@@ -356,111 +414,9 @@ def train(logger, criterion, train_loader, model, optimizer, epoch, lr_schedule,
 
     end = time.time() 
 
-    # train_first_batch = train_loader.__iter__().__next__()
-    # idx = 0
-    # images, labels = train_first_batch
-
-    # # image_list, labels = train_first_batch
-    #     # Sepearte two batches for 2 high resolution crops, and the rest 6 for low resolution crops
-    # # high_resolution_batch = image_list[:2]
-    # # high_resolution_batch = torch.cat(high_resolution_batch, dim=0)
-    # # high_resolution_batch.cuda(non_blocking=True)
-    # # high_resolution_labels = labels.repeat(2)
-
-    # # # #low resultion batch is the rest in image_list all extended, and should be tensor
-    # # low_resolution_batch = image_list[2:]
-    # # low_resolution_batch = torch.cat(low_resolution_batch, dim=0)
-    # # low_resolution_batch.cuda(non_blocking=True)
-    # # low_resolution_labels = labels.repeat(len(image_list)-2)
-
-    # # labels = torch.cat((high_resolution_labels, low_resolution_labels), dim=0)
-
-
-    # bsz = labels.shape[0]
-
-    # iteration = epoch + idx
-    # if args.lr_scheduler:
-    #     for param_group in optimizer.param_groups:
-    #         param_group["lr"] = lr_schedule[iteration]
-    # else:
-    #     for param_group in optimizer.param_groups:
-    #         param_group["lr"] = lr_schedule
-
-    # #make image list and labels tensor
-    # # images = images.cuda(non_blocking=True)
-    # # labels = labels.cuda(non_blocking=True)
-
-    # # SGD
-    # # optimizer.zero_grad()
-    # # loss.backward()
-    # # optimizer.step()
-
-    # optimizer.zero_grad()
-
-    # image_list = image_list.cuda(non_blocking=True)
-
-    # with torch.cuda.amp.autocast(enabled=args.use_fp16):
-    #     # without swav aug
-    #     output = model(images)
-
-    #     loss = criterion(output, labels)
-
-    # # with swav aug
-    # #     compute loss
-    #     # low_resolution_output = model(low_resolution_batch)
-    #     # high_resolution_output = model(high_resolution_batch)
-        
-    #     # output = torch.cat((high_resolution_output, low_resolution_output), dim=0)
-
-    #     # loss = criterion(output, labels)
-
-    # # update metric
-    # losses.update(loss.item(), bsz)
-    # acc1, acc5 = accuracy(output[:bsz], labels[:bsz], topk=(1, 5))
-    # top1.update(acc1[0], bsz)
-
-    # # SGD
-    # # optimizer.zero_grad()
-    # # loss.backward()
-    # # optimizer.step()
-    # # TODO: adjust when scaler is None
-    # scaler.scale(loss).backward()
-    # scaler.step(optimizer)
-    # scaler.update()
-
-    # # measure elapsed time
-    # batch_time.update(time.time() - end)
-    # end = time.time()
-
-    # # print info
-    # print('Train: [{0}][{1}/{2}]\t'
-    #         'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-    #         'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
-    #         'loss {loss.val:.3f} ({loss.avg:.3f})\t'
-    #         'Acc@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
-    #         epoch, idx + 1, len(train_loader), batch_time=batch_time,
-    #         data_time=data_time, loss=losses, top1=top1))
-            
-    # print("weight mean", model.module.features[0][0].weight.mean(), 
-    #         "weight std", model.module.features[0][0].weight.std())
-    # sys.stdout.flush()
 
     for idx, (image_list, labels) in tqdm(enumerate(train_loader), total=len(train_loader), desc='epoch'):
         data_time.update(time.time() - end)
-
-        # # Sepearte two batches for 2 high resolution crops, and the rest 6 for low resolution crops
-        # high_resolution_batch = image_list[:2]
-        # high_resolution_batch = torch.cat(high_resolution_batch, dim=0)
-        # high_resolution_batch.cuda(non_blocking=True)
-        # high_resolution_labels = labels.repeat(2)
-
-        # # #low resultion batch is the rest in image_list all extended, and should be tensor
-        # low_resolution_batch = image_list[2:]
-        # low_resolution_batch = torch.cat(low_resolution_batch, dim=0)
-        # low_resolution_batch.cuda(non_blocking=True)
-        # low_resolution_labels = labels.repeat(len(image_list)-2)
-
-        # labels = torch.cat((high_resolution_labels, low_resolution_labels), dim=0)
 
         labels = labels.cuda(non_blocking=True)
 
@@ -477,15 +433,7 @@ def train(logger, criterion, train_loader, model, optimizer, epoch, lr_schedule,
 
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(enabled=args.use_fp16):
-            # without swav aug
-            # image_list = image_list.cuda(non_blocking=True)
-            # output = model(image_list)
-
-        # with swav aug
-        #     compute loss
-            # low_resolution_output = model(low_resolution_batch)
-            # high_resolution_output = model(high_resolution_batch)
-            # output = torch.cat((high_resolution_output, low_resolution_output), dim=0)
+            image_list = image_list.cuda(non_blocking=True)
             output = model(image_list)
             loss = criterion(output, labels)
 
@@ -497,11 +445,6 @@ def train(logger, criterion, train_loader, model, optimizer, epoch, lr_schedule,
         acc1, acc5 = accuracy(output[:bsz], labels[:bsz], topk=(1, 5))
         top1.update(acc1[0], bsz)
 
-        # SGD
-        # optimizer.zero_grad()
-        # loss.backward()
-        # optimizer.step()
-        # TODO: adjust when scaler is None
         scaler.scale(loss).backward()
         scaler.step(optimizer)
         scaler.update()
@@ -559,3 +502,4 @@ if __name__ == "__main__":
     set_seed(42)
     wandb.require("service")
     main()
+    
